@@ -458,38 +458,22 @@ __next_base(struct hrtimer_cpu_base *cpu_base, unsigned int *active)
 #define for_each_active_base(base, cpu_base, active)	\
 	while ((base = __next_base((cpu_base), &(active))))
 
-static ktime_t __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base,
-					const struct hrtimer *exclude)
+static ktime_t __hrtimer_next_event_base(struct hrtimer_cpu_base *cpu_base,
+					 unsigned int active,
+					 ktime_t expires_next)
 {
 	struct hrtimer_clock_base *base;
-	unsigned int active = cpu_base->active_bases;
-	ktime_t expires, expires_next = KTIME_MAX;
+	ktime_t expires;
 
-	cpu_base->next_timer = NULL;
 	for_each_active_base(base, cpu_base, active) {
 		struct timerqueue_node *next;
 		struct hrtimer *timer;
 
 		next = timerqueue_getnext(&base->active);
 		timer = container_of(next, struct hrtimer, node);
-		if (timer == exclude) {
-			/* Get to the next timer in the queue. */
-			struct rb_node *rbn = rb_next(&next->node);
-
-			next = rb_entry_safe(rbn, struct timerqueue_node, node);
-			if (!next)
-				continue;
-
-			timer = container_of(next, struct hrtimer, node);
-		}
 		expires = ktime_sub(hrtimer_get_expires(timer), base->offset);
 		if (expires < expires_next) {
 			expires_next = expires;
-
-			/* Skip cpu_base update if a timer is being excluded. */
-			if (exclude)
-				continue;
-
 			cpu_base->next_timer = timer;
 		}
 	}
@@ -500,6 +484,47 @@ static ktime_t __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base,
 	 */
 	if (expires_next < 0)
 		expires_next = 0;
+	return expires_next;
+}
+
+static ktime_t __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base,
+					const struct hrtimer *exclude)
+{
+	struct hrtimer_clock_base *base;
+	unsigned int active = cpu_base->active_bases;
+	ktime_t expires_next = KTIME_MAX;
+	ktime_t expires;
+
+	cpu_base->next_timer = NULL;
+
+	for_each_active_base(base, cpu_base, active) {
+		struct timerqueue_node *next;
+	    struct hrtimer *timer;
+
+		next = timerqueue_getnext(&base->active);
+		timer = container_of(next, struct hrtimer, node);
+	    if (timer == exclude) {
+	    	/* Get to the next timer in the queue. */
+		    struct rb_node *rbn = rb_next(&next->node);
+
+		    next = rb_entry_safe(rbn, struct timerqueue_node, node);
+		    if (!next)
+		    	continue;
+
+		    timer = container_of(next, struct hrtimer, node);
+	    }
+		expires = ktime_sub(hrtimer_get_expires(timer), base->offset);
+		if (expires < expires_next) {
+			expires_next = expires;
+			/* Skip cpu_base update if a timer is being excluded. */
+			if (exclude)
+				continue;
+			cpu_base->next_timer = timer;
+		}
+	}
+
+	expires_next = __hrtimer_next_event_base(cpu_base, active, expires_next);
+
 	return expires_next;
 }
 
