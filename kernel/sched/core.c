@@ -662,7 +662,7 @@ static inline bool got_nohz_idle_kick(void)
 {
 	int cpu = smp_processor_id();
 
-	if (!test_bit(NOHZ_BALANCE_KICK, nohz_flags(cpu)))
+	if (!(atomic_read(nohz_flags(cpu)) & NOHZ_BALANCE_KICK))
 		return false;
 
 	if (idle_cpu(cpu) && !need_resched())
@@ -672,7 +672,7 @@ static inline bool got_nohz_idle_kick(void)
 	 * We can't run Idle Load Balance on this CPU for this time so we
 	 * cancel it and clear NOHZ_BALANCE_KICK
 	 */
-	clear_bit(NOHZ_BALANCE_KICK, nohz_flags(cpu));
+	atomic_andnot(NOHZ_BALANCE_KICK, nohz_flags(cpu));
 	return false;
 }
 
@@ -6285,7 +6285,7 @@ int sched_unisolate_cpu_unlocked(int cpu)
 		stop_cpus(cpumask_of(cpu), do_unisolation_work_cpu_stop, 0);
 
 		/* Kick CPU to immediately do load balancing */
-		if (!test_and_set_bit(NOHZ_BALANCE_KICK, nohz_flags(cpu)))
+		if (!atomic_fetch_or(NOHZ_BALANCE_KICK, nohz_flags(cpu)))
 			smp_send_reschedule(cpu);
 	}
 
@@ -6721,7 +6721,7 @@ void __init sched_init(void)
 #ifdef CONFIG_NO_HZ_COMMON
 		rq->last_load_update_tick = jiffies;
 		rq->last_blocked_load_update_tick = jiffies;
-		rq->nohz_flags = 0;
+		atomic_set(&rq->nohz_flags, 0);
 #endif
 #endif /* CONFIG_SMP */
 		init_rq_hrtick(rq);
