@@ -1920,6 +1920,7 @@ static void __migrate_timers(unsigned int cpu, bool remove_pinned)
 
 		if (!cpu_online(cpu))
 			BUG_ON(old_base->running_timer);
+			
 		/*
 		 * The current CPUs base clock might be stale. Update it
 		 * before moving the timers over.
