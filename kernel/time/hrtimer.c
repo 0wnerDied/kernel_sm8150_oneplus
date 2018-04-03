@@ -490,6 +490,7 @@ __next_base(struct hrtimer_cpu_base *cpu_base, unsigned int *active)
 	while ((base = __next_base((cpu_base), &(active))))
 
 static ktime_t __hrtimer_next_event_base(struct hrtimer_cpu_base *cpu_base,
+					 const struct hrtimer *exclude,
 					 unsigned int active,
 					 ktime_t expires_next)
 {
@@ -502,9 +503,24 @@ static ktime_t __hrtimer_next_event_base(struct hrtimer_cpu_base *cpu_base,
 
 		next = timerqueue_getnext(&base->active);
 		timer = container_of(next, struct hrtimer, node);
+		if (timer == exclude) {
+			/* Get to the next timer in the queue. */
+			struct rb_node *rbn = rb_next(&next->node);
+
+			next = rb_entry_safe(rbn, struct timerqueue_node, node);
+			if (!next)
+				continue;
+
+			timer = container_of(next, struct hrtimer, node);
+		}
 		expires = ktime_sub(hrtimer_get_expires(timer), base->offset);
 		if (expires < expires_next) {
 			expires_next = expires;
+
+			/* Skip cpu_base update if a timer is being excluded. */
+			if (exclude)
+				continue;
+
 			if (timer->is_soft)
 				cpu_base->softirq_next_timer = timer;
 			else
@@ -550,7 +566,8 @@ __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base, const struct hrtimer
 	if (!cpu_base->softirq_activated && (active_mask & HRTIMER_ACTIVE_SOFT)) {
 		active = cpu_base->active_bases & HRTIMER_ACTIVE_SOFT;
 		cpu_base->softirq_next_timer = NULL;
-		expires_next = __hrtimer_next_event_base(cpu_base, active, KTIME_MAX);
+		expires_next = __hrtimer_next_event_base(cpu_base, NULL,
+							 active, KTIME_MAX);
 
 		next_timer = cpu_base->softirq_next_timer;
 	}
@@ -584,7 +601,8 @@ __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base, const struct hrtimer
 	if (active_mask & HRTIMER_ACTIVE_HARD) {
 		active = cpu_base->active_bases & HRTIMER_ACTIVE_HARD;
 		cpu_base->next_timer = next_timer;
-		expires_next = __hrtimer_next_event_base(cpu_base, active, expires_next);
+		expires_next = __hrtimer_next_event_base(cpu_base, NULL, active,
+							 expires_next);
 	}
 
 	return expires_next;
@@ -1246,8 +1264,18 @@ u64 hrtimer_next_event_without(const struct hrtimer *exclude)
 
 	raw_spin_lock_irqsave(&cpu_base->lock, flags);
 
-	if (__hrtimer_hres_active(cpu_base))
-		expires = __hrtimer_get_next_event(cpu_base, exclude, HRTIMER_ACTIVE_ALL);
+	if (__hrtimer_hres_active(cpu_base)) {
+		unsigned int active;
+
+		if (!cpu_base->softirq_activated) {
+			active = cpu_base->active_bases & HRTIMER_ACTIVE_SOFT;
+			expires = __hrtimer_next_event_base(cpu_base, exclude,
+							    active, KTIME_MAX);
+		}
+		active = cpu_base->active_bases & HRTIMER_ACTIVE_HARD;
+		expires = __hrtimer_next_event_base(cpu_base, exclude, active,
+						    expires);
+	}
 
 	raw_spin_unlock_irqrestore(&cpu_base->lock, flags);
 
