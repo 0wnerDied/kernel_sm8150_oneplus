@@ -345,7 +345,8 @@ extern int persistent_clock_is_local;
 
 extern void read_persistent_clock(struct timespec *ts);
 extern void read_persistent_clock64(struct timespec64 *ts);
-extern void read_boot_clock64(struct timespec64 *ts);
+void read_persistent_clock_and_boot_offset(struct timespec64 *wall_clock,
+					   struct timespec64 *boot_offset);
 extern int update_persistent_clock(struct timespec now);
 extern int update_persistent_clock64(struct timespec64 now);
 
